@@ -1,0 +1,190 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# ========================================
+# Grimoire Key Maestro (GKM)
+# Centralized secrets loader for sh/zsh
+#
+# Source this file: . ~/.gkm/env [project_name]
+#
+# Auto-senses project from path if not specified.
+# Override with: GKM_PROJECT=myproject . ~/.gkm/env
+#                . ~/.gkm/env -p myproject
+# ========================================
+
+GKM_HOME="${GKM_HOME:-$HOME/.gkm}"
+
+_ev_project=""
+_ev_explicit=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -p|--project)
+            _ev_project="$2"
+            _ev_explicit=1
+            shift 2
+            ;;
+        *)
+            _ev_project="$1"
+            _ev_explicit=1
+            shift
+            ;;
+    esac
+done
+
+if [ -z "$_ev_explicit" ] && [ -n "$GKM_PROJECT" ]; then
+    _ev_project="$GKM_PROJECT"
+    _ev_explicit=1
+fi
+
+if [ -z "$_ev_project" ]; then
+    _ev_dir="$PWD"
+    while [ "$_ev_dir" != "/" ]; do
+        _ev_candidate=$(basename "$_ev_dir")
+        if [ -d "$GKM_HOME/$_ev_candidate" ] && [ "$_ev_candidate" != "global" ]; then
+            _ev_project="$_ev_candidate"
+            break
+        fi
+        _ev_dir=$(dirname "$_ev_dir")
+    done
+fi
+
+if [ -z "$_ev_project" ]; then
+    echo "gkm: Could not determine project. Use -p <name>, set GKM_PROJECT, or run from a project directory."
+    return 1 2>/dev/null || exit 1
+fi
+
+if [ ! -d "$GKM_HOME/$_ev_project" ] && [ "$_ev_project" != "global" ]; then
+    echo "gkm: No secrets directory for project '$_ev_project' at $GKM_HOME/$_ev_project"
+    return 1 2>/dev/null || exit 1
+fi
+
+_ev_check_gpg() {
+    if ! pgrep -x "gpg-agent" > /dev/null 2>&1; then
+        echo "gkm: gpg-agent is not running. Please start it and try again."
+        return 1
+    fi
+    gpg-connect-agent /bye >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo "gkm: Warning: gpg-agent may not be reachable or YubiKey not inserted."
+    fi
+    return 0
+}
+
+_ev_decrypt_secret() {
+    _evd_file="$1"
+    _evd_var=$(basename "$_evd_file" | sed 's/\.gpg$//')
+    if [ ! -f "$_evd_file" ]; then
+        echo "  Warning: $_evd_file not found"
+        return 1
+    fi
+    _evd_value=$(gpg --quiet --batch --decrypt "$_evd_file" 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        echo "  Decryption failed for $_evd_file, retrying in 2s..."
+        sleep 2
+        _evd_value=$(gpg --quiet --batch --decrypt "$_evd_file" 2>/dev/null)
+        if [ $? -ne 0 ]; then
+            echo "  Error: Failed to decrypt $_evd_file after retry."
+            return 1
+        fi
+    fi
+    export "$_evd_var=$_evd_value"
+    echo "  [enc] $_evd_var #($(printf '%s' "$_evd_value" | sha256sum | cut -c1-12))"
+    _EV_NEWLY_LOADED="$_EV_NEWLY_LOADED $_evd_var"
+}
+
+_ev_load_plain() {
+    _evp_file="$1"
+    _evp_var=$(basename "$_evp_file")
+    if [ ! -f "$_evp_file" ]; then
+        echo "  Warning: $_evp_file not found"
+        return 1
+    fi
+    _evp_value=$(cat "$_evp_file")
+    export "$_evp_var=$_evp_value"
+    echo "  [plain] $_evp_var #($(printf '%s' "$_evp_value" | sha256sum | cut -c1-12))"
+    _EV_NEWLY_LOADED="$_EV_NEWLY_LOADED $_evp_var"
+}
+
+_ev_load_dir() {
+    _evld_project="$1"
+    _evld_base="$GKM_HOME/$_evld_project"
+    _evld_found=0
+
+    if [ -d "$_evld_base/encrypted" ]; then
+        _evld_found=0
+        while IFS= read -r f; do
+            [ -e "$f" ] || continue
+            _evld_found=1
+            _ev_decrypt_secret "$f"
+        done <<HEREDOC
+$(find "$_evld_base/encrypted" -maxdepth 1 -name "*.gpg" 2>/dev/null | sort)
+HEREDOC
+        [ "$_evld_found" -eq 0 ] && echo "  (no encrypted secrets)"
+    else
+        echo "  (no encrypted/ folder)"
+    fi
+
+    if [ -d "$_evld_base/plain" ]; then
+        _evld_found=0
+        while IFS= read -r f; do
+            [ -e "$f" ] || continue
+            _evld_found=1
+            _ev_load_plain "$f"
+        done <<HEREDOC
+$(find "$_evld_base/plain" -maxdepth 1 -type f 2>/dev/null | sort)
+HEREDOC
+        [ "$_evld_found" -eq 0 ] && echo "  (no plain secrets)"
+    else
+        echo "  (no plain/ folder)"
+    fi
+}
+
+_ev_unload_previous() {
+    if [ -z "$_LOADED_PROJECT" ] || [ -z "$_LOADED_PROJECT_VARS" ]; then
+        return 0
+    fi
+    echo "gkm: Unloading project '$_LOADED_PROJECT'..."
+    _ev_unloaded=0
+    for var in $_LOADED_PROJECT_VARS; do
+        _ev_global_enc="$GKM_HOME/global/encrypted/$var.gpg"
+        _ev_global_plain="$GKM_HOME/global/plain/$var"
+        if [ -f "$_ev_global_enc" ] || [ -f "$_ev_global_plain" ]; then
+            continue
+        fi
+        unset "$var"
+        echo "  unset $var"
+        _ev_unloaded=$((_ev_unloaded + 1))
+    done
+    [ "$_ev_unloaded" -eq 0 ] && echo "  (nothing project-specific to unload)"
+}
+
+_ev_has_encrypted=0
+for _ev_chk_dir in "$GKM_HOME/global/encrypted" "$GKM_HOME/$_ev_project/encrypted"; do
+    if [ -d "$_ev_chk_dir" ]; then
+        if [ -n "$(find "$_ev_chk_dir" -maxdepth 1 -name "*.gpg" 2>/dev/null | head -1)" ]; then
+            _ev_has_encrypted=1
+            break
+        fi
+    fi
+done
+[ "$_ev_has_encrypted" -eq 1 ] && _ev_check_gpg
+
+_ev_unload_previous
+
+_EV_NEWLY_LOADED=""
+
+echo "gkm: Loading global secrets..."
+_ev_load_dir "global"
+
+echo "gkm: Loading project '$_ev_project'..."
+_ev_load_dir "$_ev_project"
+
+_LOADED_PROJECT="$_ev_project"
+_LOADED_PROJECT_VARS="$_EV_NEWLY_LOADED"
+export _LOADED_PROJECT _LOADED_PROJECT_VARS
+
+unset _ev_project _ev_explicit _ev_dir _ev_candidate _ev_has_encrypted
+unset _ev_chk_dir _ev_unloaded _ev_global_enc _ev_global_plain
+unset _EV_NEWLY_LOADED
+
+echo "gkm: Project '$_LOADED_PROJECT' active in this shell."

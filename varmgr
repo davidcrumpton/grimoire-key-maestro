@@ -1,0 +1,271 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# ========================================
+# Grimoire Key Maestro (GKM) — varmgr
+# Project-aware secret manager
+#
+# Usage:
+#   gkm plain <var_name> [-p project] [value]
+#   gkm encrypted <var_name> [-p project] [value]
+#   gkm delete <var_name> [-p project]
+#   gkm list [-p project]
+#   gkm projects
+#   gkm init <project>
+#
+# Project resolution order:
+#   1. -p <name> flag
+#   2. GKM_PROJECT env var
+#   3. Auto-sense from current directory path
+#   4. Interactive prompt
+# ========================================
+
+GKM_HOME="${GKM_HOME:-$HOME/.gkm}"
+
+usage() {
+    cat <<EOF
+Grimoire Key Maestro (GKM) — centralized GPG-backed secrets manager
+
+Usage: gkm <command> [options]
+
+Commands:
+  init <project>                             Create directory structure for a project
+  plain <var_name> [-p project] [value]      Store a plain-text secret
+  encrypted <var_name> [-p project] [value]  Store a GPG-encrypted secret
+  delete <var_name> [-p project]             Delete a secret (plain + encrypted)
+  list [-p project]                          List secrets for a project
+  projects                                   List all known projects
+
+Options:
+  -p, --project <name>   Explicit project name (overrides auto-sense)
+
+Value resolution (plain/encrypted):
+  1. Positional argument
+  2. Current shell env var of the same name
+  3. stdin (piped or interactive)
+
+Examples:
+  gkm init mcphe
+  echo "sk-ant-..." | gkm encrypted ANTHROPIC_API_KEY -p mcphe
+  gkm plain DB_HOST -p mcphe db.internal
+  gkm list -p mcphe
+  gkm projects
+EOF
+    exit 1
+}
+
+sense_project() {
+    _sp_dir="$PWD"
+    while [ "$_sp_dir" != "/" ]; do
+        _sp_candidate=$(basename "$_sp_dir")
+        if [ -d "$GKM_HOME/$_sp_candidate" ] && [ "$_sp_candidate" != "global" ]; then
+            echo "$_sp_candidate"
+            return 0
+        fi
+        _sp_dir=$(dirname "$_sp_dir")
+    done
+    return 1
+}
+
+resolve_project() {
+    _rp_explicit="$1"
+    if [ -n "$_rp_explicit" ]; then
+        echo "$_rp_explicit"; return 0
+    fi
+    if [ -n "$GKM_PROJECT" ]; then
+        echo "$GKM_PROJECT"; return 0
+    fi
+    _rp_sensed=$(sense_project)
+    if [ -n "$_rp_sensed" ]; then
+        echo "$_rp_sensed"; return 0
+    fi
+    printf "Project name: " >&2
+    read -r _rp_input
+    if [ -n "$_rp_input" ]; then
+        echo "$_rp_input"; return 0
+    fi
+    echo "gkm: Could not determine project." >&2
+    return 1
+}
+
+ensure_project_dirs() {
+    _epd_base="$GKM_HOME/$1"
+    mkdir -p "$_epd_base/encrypted" "$_epd_base/plain"
+    chmod 700 "$_epd_base" "$_epd_base/encrypted" "$_epd_base/plain"
+}
+
+parse_flags() {
+    _EXPLICIT_PROJECT=""
+    _ARGS=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -p|--project)
+                _EXPLICIT_PROJECT="$2"
+                shift 2
+                ;;
+            *)
+                _ARGS="$_ARGS $1"
+                shift
+                ;;
+        esac
+    done
+    _ARGS="${_ARGS# }"
+}
+
+resolve_value() {
+    _rv_var="$1"
+    _rv_given="$2"
+    if [ -n "$_rv_given" ]; then
+        printf '%s' "$_rv_given"; return 0
+    fi
+    _rv_env=$(eval echo \$"$_rv_var" 2>/dev/null)
+    if [ -n "$_rv_env" ]; then
+        echo "gkm: Using value from env \$$_rv_var" >&2
+        printf '%s' "$_rv_env"; return 0
+    fi
+    if [ ! -t 0 ]; then
+        cat
+    else
+        printf "Value for %s: " "$_rv_var" >&2
+        stty -echo 2>/dev/null
+        read -r _rv_input
+        stty echo 2>/dev/null
+        echo >&2
+        printf '%s' "$_rv_input"
+    fi
+}
+
+cmd_init() {
+    if [ -z "$1" ]; then
+        echo "gkm: project name required for init"; usage
+    fi
+    ensure_project_dirs "$1"
+    echo "gkm: Initialized $GKM_HOME/$1/{encrypted,plain}"
+}
+
+cmd_plain() {
+    parse_flags "$@"
+    # shellcheck disable=SC2086
+    set -- $_ARGS
+    var_name="$1"; var_value="$2"
+    if [ -z "$var_name" ]; then usage; fi
+    project=$(resolve_project "$_EXPLICIT_PROJECT") || exit 1
+    ensure_project_dirs "$project"
+    value=$(resolve_value "$var_name" "$var_value")
+    if [ -z "$value" ]; then
+        echo "gkm: No value provided for $var_name"; exit 1
+    fi
+    dest="$GKM_HOME/$project/plain/$var_name"
+    printf '%s' "$value" > "$dest"
+    chmod 600 "$dest"
+    echo "gkm: Stored plain $var_name in project '$project'"
+    echo "  #($(printf '%s' "$value" | sha256sum | cut -c1-12))"
+}
+
+cmd_encrypted() {
+    parse_flags "$@"
+    # shellcheck disable=SC2086
+    set -- $_ARGS
+    var_name="$1"; var_value="$2"
+    if [ -z "$var_name" ]; then usage; fi
+    if [ -z "$PGP_RECIPIENT_LIST" ]; then
+        echo "gkm: PGP_RECIPIENT_LIST is not set (comma-separated GPG recipients)"
+        exit 1
+    fi
+    project=$(resolve_project "$_EXPLICIT_PROJECT") || exit 1
+    ensure_project_dirs "$project"
+    value=$(resolve_value "$var_name" "$var_value")
+    if [ -z "$value" ]; then
+        echo "gkm: No value provided for $var_name"; exit 1
+    fi
+    _enc_recipients=""
+    _enc_list=$(echo "$PGP_RECIPIENT_LIST" | tr ',' ' ')
+    for r in $_enc_list; do
+        _enc_recipients="$_enc_recipients -r $r"
+    done
+    dest="$GKM_HOME/$project/encrypted/$var_name.gpg"
+    # shellcheck disable=SC2086
+    printf '%s' "$value" | gpg -e $_enc_recipients > "$dest"
+    if [ $? -ne 0 ]; then
+        echo "gkm: GPG encryption failed"; exit 1
+    fi
+    chmod 600 "$dest"
+    echo "gkm: Stored encrypted $var_name in project '$project'"
+    echo "  #($(printf '%s' "$value" | sha256sum | cut -c1-12))"
+}
+
+cmd_delete() {
+    parse_flags "$@"
+    # shellcheck disable=SC2086
+    set -- $_ARGS
+    var_name="$1"
+    if [ -z "$var_name" ]; then usage; fi
+    project=$(resolve_project "$_EXPLICIT_PROJECT") || exit 1
+    _del_plain="$GKM_HOME/$project/plain/$var_name"
+    _del_enc="$GKM_HOME/$project/encrypted/$var_name.gpg"
+    _del_found=0
+    if [ -f "$_del_plain" ]; then
+        rm -f "$_del_plain"
+        echo "gkm: Deleted plain $var_name from project '$project'"
+        _del_found=1
+    fi
+    if [ -f "$_del_enc" ]; then
+        rm -f "$_del_enc"
+        echo "gkm: Deleted encrypted $var_name from project '$project'"
+        _del_found=1
+    fi
+    [ "$_del_found" -eq 0 ] && echo "gkm: $var_name not found in project '$project'"
+}
+
+cmd_list() {
+    parse_flags "$@"
+    project=$(resolve_project "$_EXPLICIT_PROJECT") || exit 1
+    echo "Project: $project"
+    _list_base="$GKM_HOME/$project"
+    if [ ! -d "$_list_base" ]; then
+        echo "  (no secrets directory found)"; return
+    fi
+    echo "  Encrypted:"
+    _list_found=0
+    for f in "$_list_base/encrypted/"*.gpg; do
+        [ -e "$f" ] || continue
+        echo "    $(basename "$f" .gpg)"
+        _list_found=1
+    done
+    [ "$_list_found" -eq 0 ] && echo "    (none)"
+    echo "  Plain:"
+    _list_found=0
+    for f in "$_list_base/plain/"*; do
+        [ -e "$f" ] || continue
+        echo "    $(basename "$f")"
+        _list_found=1
+    done
+    [ "$_list_found" -eq 0 ] && echo "    (none)"
+}
+
+cmd_projects() {
+    echo "Grimoire Key Maestro projects in $GKM_HOME:"
+    _proj_found=0
+    for d in "$GKM_HOME"/*/; do
+        [ -d "$d" ] || continue
+        _proj_name=$(basename "$d")
+        _proj_enc=0; _proj_plain=0
+        for f in "$d/encrypted/"*.gpg; do [ -e "$f" ] && _proj_enc=$((_proj_enc + 1)); done
+        for f in "$d/plain/"*; do [ -e "$f" ] && _proj_plain=$((_proj_plain + 1)); done
+        echo "  $_proj_name  (${_proj_enc} encrypted, ${_proj_plain} plain)"
+        _proj_found=1
+    done
+    [ "$_proj_found" -eq 0 ] && echo "  (none — run 'gkm init <project>' to get started)"
+}
+
+if [ -z "$1" ]; then usage; fi
+cmd="$1"; shift
+
+case "$cmd" in
+    plain)      cmd_plain "$@" ;;
+    encrypted)  cmd_encrypted "$@" ;;
+    delete)     cmd_delete "$@" ;;
+    list)       cmd_list "$@" ;;
+    projects)   cmd_projects ;;
+    init)       cmd_init "$@" ;;
+    *)          echo "gkm: Unknown command: $cmd"; usage ;;
+esac
