@@ -117,12 +117,6 @@ Because of the `shell_profile_snippet.sh`, if you `cd` into a folder that matche
 ![Example Usage](./images/gkm-load-project.png)
 
 ```shell
-  gkm init mcphe
-  echo "sk-ant-..." | gkm encrypted ANTHROPIC_API_KEY -p mcphe
-  gkm plain DB_HOST -p mcphe db.internal
-  gkm list -p mcphe
-  gkm projects
-
 ✘ bear@workstation ~/Workspace/phanatic
 ❯ gkm init phanatic                                                                                                          Tue Jun 16 19:26:00
 gkm: Initialized /Users/bear/.gkm/phanatic/{encrypted,plain}
