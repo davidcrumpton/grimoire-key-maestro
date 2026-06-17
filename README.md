@@ -3,7 +3,7 @@
 ![GKM Avatar](./images/gkm-avatar.png)
 A lightweight, CLI-driven system for managing environment variables across multiple projects with optional GPG encryption and automatic shell loading based on your current directory. I developed this because I came close to pushing secret keys to GitHub multiple times, and I wanted a more organized way to manage secrets across my projects without relying on third-party services.
 
-This is specific to my use case gpg because my PGP keys are on YubiKeys and it is so easy to tap the disc!  However, you can use gpg without a YubiKey if you prefer, and the system will work just fine but I do recommend the GPG Agent.  The main point is that it provides a way to manage secrets in a more secure and organized way, without relying on third-party services.  Savvy people will note that the encryption/decryption can be swapped with popular CLI tools like `sops` if you prefer that workflow, but I wanted to keep it simple and use tools I already had set up.
+This application is specific to my use case because my PGP keys are on YubiKeys and it's effotless to tap the disc!  However, you can use gpg without a YubiKey if you prefer, and the system will work just fine but use the GPG Agent.  The main point is GKM provides a way to manage secrets in a more secure and organized way, without relying on third-party services.  Savvy people will note that the encryption/decryption can be swapped with popular CLI tools like `sops` if you prefer that workflow, but I wanted to keep it simple and use tools I already had.
 
 ## 🚀 Features
 
