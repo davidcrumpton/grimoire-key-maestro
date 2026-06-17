@@ -111,3 +111,43 @@ Because of the `shell_profile_snippet.sh`, if you `cd` into a folder that matche
 - **Permissions:** The installer automatically sets strict permissions (`700` for directories, `600` for files) on the `.envvars` folder.
 - **GPG Requirement:** All "encrypted" secrets require a valid GPG agent and must be encrypted using the keys listed in your `PGP_RECIPIENT_LIST`.
 - **Plain Text Warning:** Only use `gkm plain` for information that is not sensitive enough to be leaked if the `.envvars` folder were compromised.
+
+## Example Usage
+
+![Example Usage](./images/gkm-load-project.png)
+
+```shell
+  gkm init mcphe
+  echo "sk-ant-..." | gkm encrypted ANTHROPIC_API_KEY -p mcphe
+  gkm plain DB_HOST -p mcphe db.internal
+  gkm list -p mcphe
+  gkm projects
+
+✘ bear@workstation ~/Workspace/phanatic
+❯ gkm init phanatic                                                                                                          Tue Jun 16 19:26:00
+gkm: Initialized /Users/bear/.gkm/phanatic/{encrypted,plain}
+
+✔ bear@workstation ~/Workspace/phanatic
+❯ PHANATIC_PASS=$(pwgen)                                                                                                     Tue Jun 16 19:26:11
+
+✔ bear@workstation ~/Workspace/phanatic
+❯ export PHANATIC_PASS                                                                                                       Tue Jun 16 19:26:33
+
+✔ bear@workstation ~/Workspace/phanatic
+❯ PHANATIC_USER=phan4ever                                                                                                    Tue Jun 16 19:26:40
+
+✔ bear@workstation ~/Workspace/phanatic
+❯ export PHANATIC_USER                                                                                                       Tue Jun 16 19:26:53
+
+✔ bear@workstation ~/Workspace/phanatic
+❯ gkm encrypted PHANATIC_PASS                                                                                                Tue Jun 16 19:26:58
+gkm: Using value from env $PHANATIC_PASS
+gkm: Stored encrypted PHANATIC_PASS in project 'phanatic'
+  #(d5f39bc635b8)
+
+✔ bear@workstation ~/Workspace/phanatic
+❯ gkm plain PHANATIC_USER                                                                                                    Tue Jun 16 19:27:17
+gkm: Using value from env $PHANATIC_USER
+gkm: Stored plain PHANATIC_USER in project 'phanatic'
+  #(ed0f9037d5ba)
+```
