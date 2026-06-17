@@ -1,4 +1,4 @@
-# Grimoire Key Maestro: A Centralized Secret Manager
+# Grimoire Key Maestro: A Centralized Secret Manager for Projects
 
 ![GKM Avatar](./images/gkm-avatar.png)
 A lightweight, CLI-driven system for managing environment variables across multiple projects with optional GPG encryption and automatic shell loading based on your current directory. I developed this because I came close to pushing secret keys to GitHub multiple times, and I wanted a more organized way to manage secrets across my projects without relying on third-party services.
