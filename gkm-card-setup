@@ -1,0 +1,110 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# ========================================
+# GKM Card Setup Helper
+# Interactive tool to configure smart cards
+# ========================================
+
+GKM_HOME="${GKM_HOME:-$HOME/.gkm}"
+CARDS_DIR="$GKM_HOME/cards"
+CARDS_CONFIG="$CARDS_DIR/config.yaml"
+
+setup_cards() {
+    echo "GKM Card Setup Helper"
+    echo "===================="
+    echo ""
+    
+    # Create cards directory if needed
+    mkdir -p "$CARDS_DIR"
+    chmod 700 "$CARDS_DIR"
+    
+    # Check if config exists
+    if [ -f "$CARDS_CONFIG" ]; then
+        echo "Configuration file already exists: $CARDS_CONFIG"
+        echo ""
+        read -p "Do you want to add another card? (y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Exiting."
+            return 0
+        fi
+        echo ""
+    fi
+    
+    echo "Let's configure your smart card(s)."
+    echo ""
+    echo "To find your smart card serial number, run:"
+    echo "  gpg --card-status | grep 'Serial number'"
+    echo ""
+    
+    # Get card name
+    read -p "Card name (e.g., 'primary-key', 'backup-key'): " card_name
+    if [ -z "$card_name" ]; then
+        echo "Card name cannot be empty."
+        return 1
+    fi
+    
+    # Get serial number
+    read -p "Smart card serial number: " serial
+    if [ -z "$serial" ]; then
+        echo "Serial number cannot be empty."
+        return 1
+    fi
+    
+    # Get recipient email
+    echo ""
+    echo "Available GPG keys:"
+    gpg --list-keys --with-key-origin 2>/dev/null | grep -E "uid|fpr" | head -20 || echo "  (no keys found)"
+    echo ""
+    read -p "GPG recipient (email or key ID): " recipient
+    if [ -z "$recipient" ]; then
+        echo "Recipient cannot be empty."
+        return 1
+    fi
+    
+    # Get optional description
+    read -p "Description (optional, e.g., 'Primary YubiKey'): " description
+    
+    echo ""
+    echo "Adding card configuration..."
+    echo ""
+    
+    # Create or append to config
+    if [ ! -f "$CARDS_CONFIG" ]; then
+        cat > "$CARDS_CONFIG" <<EOF
+# GKM Cards Configuration
+# Define your smart cards here for gkm-card-check
+#
+# Usage:
+#   gkm-card-check                # Check all cards
+#   gkm-card-check <card_name>    # Check specific card
+#   gkm-card-check --list         # List all cards
+
+EOF
+    fi
+    
+    # Append new card
+    {
+        echo "$card_name:"
+        echo "  serial: \"$serial\""
+        echo "  recipient: \"$recipient\""
+        [ -n "$description" ] && echo "  description: \"$description\""
+        echo ""
+    } >> "$CARDS_CONFIG"
+    
+    chmod 600 "$CARDS_CONFIG"
+    
+    echo "✓ Card configuration saved to $CARDS_CONFIG"
+    echo ""
+    
+    # Test the configuration
+    echo "Testing configuration..."
+    if command -v gkm-card-check &>/dev/null; then
+        echo ""
+        gkm-card-check --list
+    else
+        echo "Note: gkm-card-check not found. Install GKM first."
+    fi
+}
+
+setup_cards "$@"

@@ -112,6 +112,46 @@ Because of the `shell_profile_snippet.sh`, if you `cd` into a folder that matche
 - **GPG Requirement:** All "encrypted" secrets require a valid GPG agent and must be encrypted using the keys listed in your `PGP_RECIPIENT_LIST`.
 - **Plain Text Warning:** Only use `gkm plain` for information that is not sensitive enough to be leaked if the `.envvars` folder were compromised.
 
+---
+
+## 🔑 Smart Card Support (YubiKey & Others)
+
+GKM includes built-in support for YubiKeys and other smart cards to automatically verify they're inserted and usable:
+
+**Quick Start:**
+
+```bash
+gkm-card-setup       # Interactive setup for your smart cards
+gkm-card-check       # Verify card is present and usable
+```
+
+**Features:**
+
+- ✅ Support for multiple YubiKeys with different signing identities
+- ✅ Graceful fallback for non-YubiKey users (silently succeeds if no cards configured)
+- ✅ Easy integration with CI/CD pipelines
+- ✅ Pre-flight checks before signing operations
+
+**Usage Examples:**
+
+```bash
+# Check if your primary signing key is available
+gkm-card-check primary-key
+
+# Get status of all configured cards
+gkm-card-check --status
+
+# Use in scripts for conditional signing
+if gkm-card-check; then
+  gpg --sign myfile.txt
+fi
+```
+
+For quick reference, see [QUICK-START-CARDS.md](./QUICK-START-CARDS.md).  
+For detailed setup and configuration, see [CARD-CHECK-SETUP.md](./CARD-CHECK-SETUP.md).
+
+---
+
 ## Example Usage
 
 ![Example Usage](./images/gkm-load-project.png)

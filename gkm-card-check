@@ -1,0 +1,332 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# ========================================
+# GKM Card Check — Smart Card Validator
+# Checks if configured YubiKeys/smart cards are inserted and usable
+#
+# Usage:
+#   gkm-card-check                    # Check all configured cards
+#   gkm-card-check <card_name>        # Check specific card
+#   gkm-card-check --list             # List all configured cards
+#   gkm-card-check --status           # Detailed status report
+#
+# Configuration:
+#   ~/.gkm/cards/config.yaml          # Define cards and recipients
+# ========================================
+
+set -e
+
+GKM_HOME="${GKM_HOME:-$HOME/.gkm}"
+CARDS_DIR="$GKM_HOME/cards"
+CARDS_CONFIG="$CARDS_DIR/config.yaml"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+usage() {
+    cat <<EOF
+GKM Card Check — Smart Card Validator
+
+Usage: gkm-card-check [command] [options]
+
+Commands:
+  (no args)           Check all configured cards, exit 0 if all present, 1 if any missing
+  <card_name>         Check specific card, exit 0 if present, 1 if missing
+  --list              List all configured cards with their details
+  --status            Show detailed status report for all cards
+  --help              Show this help message
+
+Configuration:
+  Create ~/.gkm/cards/config.yaml with your card definitions.
+  See ~/.gkm/cards/example.yaml for template.
+
+Examples:
+  gkm-card-check                    # Quick check all cards
+  gkm-card-check primary-key        # Check specific card
+  gkm-card-check --status           # Detailed report
+  gkm-card-check --list             # List all cards
+EOF
+    exit "${1:-0}"
+}
+
+# Parse YAML manually (avoid dependencies like yq)
+parse_yaml() {
+    local file="$1"
+    local prefix="$2"
+    
+    if [ ! -f "$file" ]; then
+        return 1
+    fi
+    
+    local current_card=""
+    
+    while IFS= read -r line; do
+        # Skip empty lines and comments
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        
+        # Count leading spaces to determine nesting level
+        local leading_spaces=""
+        [[ "$line" =~ ^([[:space:]]*) ]] && leading_spaces="${BASH_REMATCH[1]}"
+        local spaces=${#leading_spaces}
+        
+        # Remove all leading whitespace for pattern matching
+        local trimmed="${line#"${line%%[![:space:]]*}"}"
+        
+        # Top-level card entry (0 indentation)
+        if [[ $spaces -eq 0 && "$trimmed" =~ ^([a-zA-Z0-9_-]+): ]]; then
+            current_card="${BASH_REMATCH[1]}"
+            # Normalize card name (replace hyphens with underscores for bash variable names)
+            current_card="${current_card//-/_}"
+        fi
+        
+        # Card properties (2 spaces indentation)
+        if [[ $spaces -eq 2 && -n "$current_card" ]]; then
+            if [[ "$trimmed" =~ ^serial: ]]; then
+                if [[ "$trimmed" =~ \"([0-9]+)\" ]]; then
+                    eval "${prefix}${current_card}_serial='${BASH_REMATCH[1]}'"
+                fi
+            fi
+            if [[ "$trimmed" =~ ^recipient: ]]; then
+                if [[ "$trimmed" =~ \"([^\"]+)\" ]]; then
+                    eval "${prefix}${current_card}_recipient='${BASH_REMATCH[1]}'"
+                fi
+            fi
+            if [[ "$trimmed" =~ ^description: ]]; then
+                if [[ "$trimmed" =~ \"([^\"]+)\" ]]; then
+                    eval "${prefix}${current_card}_description='${BASH_REMATCH[1]}'"
+                fi
+            fi
+        fi
+    done < "$file"
+}
+
+# Extract all card names from YAML
+get_card_names() {
+    local file="$1"
+    
+    if [ ! -f "$file" ]; then
+        return 1
+    fi
+    
+    grep -E "^[a-zA-Z0-9_-]+:$" "$file" | sed 's/:$//'
+}
+
+# Check if a card is inserted and usable
+check_card() {
+    local serial="$1"
+    
+    # Method 1: Check if SSH agent is offering the key (most reliable for usability)
+    local ssh_output
+    ssh_output=$(ssh-add -l 2>&1 || true)
+    if echo "$ssh_output" | grep -q "cardno:$serial"; then
+        return 0
+    fi
+    
+    # Method 2: Check if card is physically inserted via gpg
+    if command -v gpg &> /dev/null; then
+        local card_status
+        card_status=$(gpg --card-status 2>&1 || true)
+        if echo "$card_status" | grep -q "$serial"; then
+            return 0
+        fi
+    fi
+    
+    return 1
+}
+
+# Get card serial from config
+get_card_serial() {
+    local card_name="$1"
+    # Normalize card name for variable lookup
+    card_name="${card_name//-/_}"
+    parse_yaml "$CARDS_CONFIG" "_CARD_"
+    eval "echo \$_CARD_${card_name}_serial"
+}
+
+# Get card description from config
+get_card_description() {
+    local card_name="$1"
+    # Normalize card name for variable lookup
+    card_name="${card_name//-/_}"
+    parse_yaml "$CARDS_CONFIG" "_CARD_"
+    eval "echo \$_CARD_${card_name}_description" || echo ""
+}
+
+# List all configured cards
+list_cards() {
+    if [ ! -f "$CARDS_CONFIG" ]; then
+        echo -e "${YELLOW}No cards configured yet.${NC}"
+        echo "Create $CARDS_CONFIG to get started."
+        return 1
+    fi
+    
+    echo -e "${BLUE}Configured Smart Cards:${NC}"
+    echo ""
+    
+    parse_yaml "$CARDS_CONFIG" "_CARD_"
+    
+    local card_names
+    card_names=$(get_card_names "$CARDS_CONFIG")
+    
+    if [ -z "$card_names" ]; then
+        echo -e "${YELLOW}No cards configured in $CARDS_CONFIG${NC}"
+        return 1
+    fi
+    
+    while IFS= read -r card; do
+        local normalized_card="${card//-/_}"
+        eval "serial=\$_CARD_${normalized_card}_serial"
+        eval "recipient=\$_CARD_${normalized_card}_recipient"
+        eval "description=\$_CARD_${normalized_card}_description"
+        
+        printf "  %-20s Serial: %-12s Recipient: %s\n" "$card" "$serial" "$recipient"
+        [ -n "$description" ] && printf "    → %s\n" "$description"
+    done <<< "$card_names"
+}
+
+# Show detailed status
+show_status() {
+    if [ ! -f "$CARDS_CONFIG" ]; then
+        echo -e "${YELLOW}No cards configured yet.${NC}"
+        return 1
+    fi
+    
+    echo -e "${BLUE}Smart Card Status Report${NC}"
+    echo "=========================="
+    echo ""
+    
+    parse_yaml "$CARDS_CONFIG" "_CARD_"
+    
+    local card_names
+    card_names=$(get_card_names "$CARDS_CONFIG")
+    
+    if [ -z "$card_names" ]; then
+        echo -e "${YELLOW}No cards configured${NC}"
+        return 1
+    fi
+    
+    local all_present=true
+    
+    while IFS= read -r card; do
+        local normalized_card="${card//-/_}"
+        eval "serial=\$_CARD_${normalized_card}_serial"
+        eval "recipient=\$_CARD_${normalized_card}_recipient"
+        eval "description=\$_CARD_${normalized_card}_description"
+        
+        if check_card "$serial"; then
+            echo -e "${GREEN}✓${NC} $card (Serial: $serial)"
+            echo "  Recipient: $recipient"
+            [ -n "$description" ] && echo "  Description: $description"
+            echo "  Status: INSERTED & USABLE"
+        else
+            echo -e "${RED}✗${NC} $card (Serial: $serial)"
+            echo "  Recipient: $recipient"
+            [ -n "$description" ] && echo "  Description: $description"
+            echo "  Status: NOT INSERTED or NOT USABLE"
+            all_present=false
+        fi
+        echo ""
+    done <<< "$card_names"
+    
+    if [ "$all_present" = true ]; then
+        echo -e "${GREEN}All configured cards are present and usable.${NC}"
+        return 0
+    else
+        echo -e "${RED}Some cards are missing or not usable.${NC}"
+        return 1
+    fi
+}
+
+# Check a specific card
+check_specific_card() {
+    local card_name="$1"
+    local serial
+    
+    serial=$(get_card_serial "$card_name")
+    
+    if [ -z "$serial" ]; then
+        echo -e "${RED}Card '$card_name' not found in configuration.${NC}" >&2
+        return 1
+    fi
+    
+    if check_card "$serial"; then
+        echo -e "${GREEN}✓${NC} Card $card_name (Serial: $serial) is inserted and usable."
+        return 0
+    else
+        echo -e "${RED}✗${NC} Card $card_name (Serial: $serial) is NOT inserted or not usable." >&2
+        return 1
+    fi
+}
+
+# Check all configured cards
+check_all_cards() {
+    if [ ! -f "$CARDS_CONFIG" ]; then
+        # No config = silently succeed (graceful fallback for non-YubiKey users)
+        return 0
+    fi
+    
+    parse_yaml "$CARDS_CONFIG" "_CARD_"
+    
+    local card_names
+    card_names=$(get_card_names "$CARDS_CONFIG")
+    
+    if [ -z "$card_names" ]; then
+        # No cards configured = silently succeed
+        return 0
+    fi
+    
+    local all_present=true
+    local missing_cards=""
+    
+    while IFS= read -r card; do
+        local normalized_card="${card//-/_}"
+        eval "serial=\$_CARD_${normalized_card}_serial"
+        
+        if ! check_card "$serial"; then
+            all_present=false
+            missing_cards="$missing_cards$card ($serial), "
+        fi
+    done <<< "$card_names"
+    
+    if [ "$all_present" = true ]; then
+        return 0
+    else
+        # Remove trailing comma and space
+        missing_cards="${missing_cards%, }"
+        echo -e "${RED}Missing or unusable cards: $missing_cards${NC}" >&2
+        return 1
+    fi
+}
+
+# Main logic
+main() {
+    case "${1:-}" in
+        --help|-h)
+            usage 0
+            ;;
+        --list)
+            list_cards
+            ;;
+        --status)
+            show_status
+            ;;
+        --version)
+            echo "GKM Card Check v1.0"
+            exit 0
+            ;;
+        "")
+            # Check all cards
+            check_all_cards
+            ;;
+        *)
+            # Check specific card
+            check_specific_card "$1"
+            ;;
+    esac
+}
+
+main "$@"

@@ -1,0 +1,33 @@
+# GKM Cards Configuration
+# Define your smart cards (YubiKeys, etc.) here for gkm-card-check
+#
+# YAML Format:
+#   card_name:
+#     serial: "12345678"              # Required: Smart card serial number
+#     recipient: "user@example.com"   # Required: GPG recipient email/key ID
+#     description: "Primary key"      # Optional: Human-readable description
+#
+# Usage:
+#   gkm-card-check                    # Check all cards
+#   gkm-card-check primary-key        # Check specific card
+#   gkm-card-check --list             # List all cards
+#   gkm-card-check --status           # Detailed status
+
+# Example: Primary YubiKey for main email
+primary-key:
+  serial: "4146669"
+  recipient: "bear@example.com"
+  description: "Primary YubiKey for work"
+
+# Example: Backup YubiKey for secondary email
+# Uncomment and configure when you have a backup key
+# backup-key:
+#   serial: "5847201"
+#   recipient: "backup@example.com"
+#   description: "Backup YubiKey"
+
+# Example: Another key if using multiple signing identities
+# secondary-key:
+#   serial: "9182736"
+#   recipient: "secondary@example.com"
+#   description: "Secondary key for project X"
