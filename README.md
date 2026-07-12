@@ -98,6 +98,7 @@ gkm encrypted DB_PASS -p mcphe
 The included shell script provides helpers to interact with your current session:
 
 - `load_project [-p proj]`: Manually load a specific project's variables into your environment.
+- `reload_project [-p proj]`: Unload and then reload the current project's variables.
 - `project_status`: Show which project is currently active and which variables are loaded.
 - `unload_project`: Clear all variables from the current shell session.
 

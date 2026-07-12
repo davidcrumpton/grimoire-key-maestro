@@ -25,6 +25,14 @@ load_project() {
 }
 
 # ----------------------------------------
+# reload_project: reload project secrets
+# ----------------------------------------
+reload_project() {
+    unload_project
+    load_project
+}
+
+# ----------------------------------------
 # unload_project: clear all loaded secrets from current project
 # ----------------------------------------
 unload_project() {
