@@ -145,7 +145,7 @@ _ev_unload_previous() {
     fi
     echo "gkm: Unloading project '$_LOADED_PROJECT'..."
     _ev_unloaded=0
-    for var in echo $($_LOADED_PROJECT_VARS); do
+    for var in $(echo $_LOADED_PROJECT_VARS); do
         _ev_global_enc="$GKM_HOME/global/encrypted/$var.gpg"
         _ev_global_plain="$GKM_HOME/global/plain/$var"
         if [ -f "$_ev_global_enc" ] || [ -f "$_ev_global_plain" ]; then
