@@ -41,7 +41,7 @@ unload_project() {
         return 0
     fi
     echo "gkm: Unloading all secrets for '$_LOADED_PROJECT'..."
-    for _up_var in $_LOADED_PROJECT_VARS; do
+    for _up_var in $(echo $_LOADED_PROJECT_VARS); do
         unset "$_up_var"
         echo "  unset $_up_var"
     done
