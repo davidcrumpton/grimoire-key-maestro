@@ -18,10 +18,10 @@ This application is specific to my use case because my PGP keys are on YubiKeys 
 
 ## 📂 Project Structure
 
-The system uses a centralized home in `~/.envvars`:
+The system uses a centralized home in $GKM_HOME (if defined), otherwise in `~/.gkm`:
 
 ```text
-~/.envvars/
+$GKM_HOME/
 ├── env                 # The loader script used by your shell
 ├── global/             # Secrets available to all projects
 │   ├── plain/         # Plain-text files
@@ -30,6 +30,8 @@ The system uses a centralized home in `~/.envvars`:
     ├── plain/
     └── encrypted/
 ```
+
+Note GKM_HOME *must* be set before initializing new projects for the first time!  Once a project is initialized, it will be created in the current GKM_HOME and subsequent calls will update that project so ensure it is in your shell RC files if you want to use it from the start.
 
 ---
 

@@ -3,7 +3,7 @@
 # Add this to your ~/.zshrc or ~/.bashrc
 # ========================================
 
-export GKM_HOME="$HOME/.gkm"
+GKM_HOME="${GKM_HOME:-$HOME/.gkm}"
 
 # Ensure gkm is on PATH
 export PATH="$HOME/.local/bin:$PATH"
